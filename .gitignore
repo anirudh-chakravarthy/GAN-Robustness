@@ -1,0 +1,12 @@
+# dataset
+data/thumbnails128x128
+**.mdb
+
+**.ipynb_checkpoints
+**.DS_Store
+
+# checkpoints
+**.pkl
+**.pt
+**.pth
+**.model
