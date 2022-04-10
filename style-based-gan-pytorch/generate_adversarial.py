@@ -1,3 +1,6 @@
+'''
+    Usage: python generate_adversarial.py --size 256 stylegan-256px-new.model
+'''
 import argparse
 import math
 
@@ -5,6 +8,10 @@ import torch
 from torchvision import utils
 
 from model import StyledGenerator
+import lpips
+
+from torchattacks import PGD
+import pdb
 
 
 @torch.no_grad()
@@ -34,6 +41,52 @@ def sample(generator, step, mean_style, n_sample, device):
     )
     
     return image
+
+
+def attack(generator, step, mean_style, n_sample, device):
+#     loss_fn = lpips.PerceptualLoss(
+#         model="net-lin", net="vgg", use_gpu=device.startswith("cuda")
+#     )
+    loss_fn = None
+
+    z = torch.randn(n_sample, 512).to(device)
+    noise = []
+    for i in range(step + 1):
+        size = 4 * 2 ** i
+        noise.append(torch.randn(z.shape[0], 1, size, size, device=z.device))
+
+    adversary = PGD(generator, loss_fn, eps=0.05)
+    adv_z = adversary(
+        z,
+        noise,
+        step=step,
+        alpha=1,
+        mean_style=mean_style,
+        style_weight=0.7,
+    )
+
+    print(torch.mean((z-adv_z) **2))
+
+    with torch.no_grad():
+        image = generator(
+            z,
+            noise=noise,
+            step=step,
+            alpha=1,
+            mean_style=mean_style,
+            style_weight=0.7,
+        )
+        adv_image = generator(
+            adv_z,
+            noise=noise,
+            step=step,
+            alpha=1,
+            mean_style=mean_style,
+            style_weight=0.7,
+        )
+
+    return image, adv_image
+    
 
 @torch.no_grad()
 def style_mixing(generator, step, mean_style, n_source, n_target, device):
@@ -90,11 +143,13 @@ if __name__ == '__main__':
 
     step = int(math.log(args.size, 2)) - 2
     
-    img = sample(generator, step, mean_style, args.n_row * args.n_col, device)
+    # img = sample(generator, step, mean_style, args.n_row * args.n_col, device)
+    img, adv_img = attack(generator, step, mean_style, args.n_row * args.n_col, device)
     utils.save_image(img, 'sample.png', nrow=args.n_col, normalize=True, range=(-1, 1))
+    utils.save_image(adv_img, 'sample_adv.png', nrow=args.n_col, normalize=True, range=(-1, 1))
     
-    for j in range(20):
-        img = style_mixing(generator, step, mean_style, args.n_col, args.n_row, device)
-        utils.save_image(
-            img, f'sample_mixing_{j}.png', nrow=args.n_col + 1, normalize=True, range=(-1, 1)
-        )
+#     for j in range(20):
+#         img = style_mixing(generator, step, mean_style, args.n_col, args.n_row, device)
+#         utils.save_image(
+#             img, f'sample_mixing_{j}.png', nrow=args.n_col + 1, normalize=True, range=(-1, 1)
+#         )
