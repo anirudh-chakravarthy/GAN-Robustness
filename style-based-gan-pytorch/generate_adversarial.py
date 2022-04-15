@@ -25,8 +25,8 @@ def visualize_data_distribution(z, adv_z):
     z_proj = pca.fit_transform(z)
     adv_z_proj = pca.fit_transform(adv_z)
 
-    plt.scatter(z_proj[:, 0], z_proj[:, 1], label='Orig', alpha=0.20)
-    plt.scatter(adv_z_proj[:, 0], adv_z_proj[:, 1], label='Adv', alpha=0.20)
+    plt.scatter(z_proj[:, 0], z_proj[:, 1], label='Orig', c='#6A10F1', alpha=0.80)
+    plt.scatter(adv_z_proj[:, 0], adv_z_proj[:, 1], label='Adv', c='#14F110', alpha=0.80)
     plt.legend()
     plt.savefig(f'latent_space_vis.png')
 
@@ -81,8 +81,8 @@ def attack(generator, discriminator, step, mean_style, n_sample, device):
             size = 4 * 2 ** i
             noise.append(torch.randn(z.shape[0], 1, size, size, device=z.device))
 
-        adversary = PGD(generator, discriminator, alpha=1, 
-                        steps=1000, random_start=False, eps=0.05)
+        adversary = PGD(generator, discriminator, alpha=1,
+                        steps=100, random_start=False, eps=0.05)
         adv_z = adversary(
             z,
             noise,
@@ -135,8 +135,8 @@ def attack(generator, discriminator, step, mean_style, n_sample, device):
     sigma = torch.std(z, dim=0)
     adv_mu = torch.mean(adv_z, dim=0)
     adv_sigma = torch.std(adv_z, dim=0)
-    print(-0.5 * (1. + (sigma **2).log() - mu **2 - sigma **2).mean())
-    print(-0.5 * (1. + (adv_sigma **2).log() - adv_mu **2 - adv_sigma **2).mean())
+    print('Sampled KL:', -0.5 * (1. + (sigma **2).log() - mu **2 - sigma **2).mean().item())
+    print('Adversarial KL:', -0.5 * (1. + (adv_sigma **2).log() - adv_mu **2 - adv_sigma **2).mean().item())
 
     image = torch.stack(images, dim=0)
     adv_image = torch.stack(adv_images, dim=0)

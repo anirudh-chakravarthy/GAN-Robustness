@@ -147,6 +147,7 @@ def train(args, dataset, discriminator):
             gen_in1 = gen_in1.squeeze(0)
             gen_in2 = gen_in2.squeeze(0)
 
+        # TODO: normalize b/w [-1, 1]
         fake_image = torch.rand(real_image.shape, device=real_image.device)
         fake_predict = discriminator(fake_image, step=step, alpha=alpha)
 
@@ -249,7 +250,7 @@ if __name__ == '__main__':
     if args.sched:
         args.lr = {128: 0.0015, 256: 0.002, 512: 0.003, 1024: 0.003}
         # args.batch = {4: 512, 8: 256, 16: 128, 32: 64, 64: 32, 128: 32, 256: 32}
-        args.batch = {4: 16, 8: 8, 16: 4, 32: 4, 64: 4, 128: 4, 256: 4}
+        args.batch = {4: 4, 8: 4, 16: 4, 32: 4, 64: 4, 128: 4, 256: 4}
 
     else:
         args.lr = {}

@@ -72,7 +72,7 @@ class PGD(Attack):
 
             # Calculate discriminator loss
             disc_out = self.discriminator(outputs, step=step, alpha=alpha)
-            loss = F.softplus(-disc_out).mean()
+            loss = F.softplus(disc_out).mean()
             print('Disc:', loss.item())
 
             # drive outputs to zeros, adv attack needs to actually minimize this loss
@@ -84,6 +84,7 @@ class PGD(Attack):
             kl_loss = -0.5 * (1. + (sigma **2).log() - mu **2 - sigma **2).mean()
             print('KL:', kl_loss.item())
 
+            # we perform gradient ascent but should still minimize KL div
             loss = loss - 100. * kl_loss
 #             print('Wrong predictions: {} / {}'.format(
 #                 (disc_out.sigmoid() < 0.5).sum().item(), disc_out.shape[0]))
