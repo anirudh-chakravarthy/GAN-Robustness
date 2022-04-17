@@ -63,6 +63,7 @@ class PGD(Attack):
             adv_latent = adv_latent.detach()
 
         adv_latents = []
+        print(f"Adversarial Attack for Steps={self.steps}")
         for _ in range(self.steps):
             self.model.zero_grad()
             self.discriminator.zero_grad()
