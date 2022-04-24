@@ -489,18 +489,6 @@ class StyledGenerator(nn.Module):
         attack_w=False
     ):  
 
-        # Decide whether to attack w_space.
-        adversary = None
-        if attack_w:
-            adversary = PGD(
-                self, 
-                discriminator, 
-                alpha=1,
-                steps=100, 
-                random_start=False, 
-                eps=0.05
-            )
-
         styles = []
         if type(input) not in (list, tuple):
             input = [input]
@@ -527,16 +515,26 @@ class StyledGenerator(nn.Module):
             styles = styles_norm
 
         # If `attack_w` is set to True, compute attacked w. 
+        styles_attacked = []
         if attack_w:
-            styles_attacked = []
+            adversary = PGD(
+                self.generator, 
+                discriminator, 
+                alpha=1,
+                steps=100, 
+                random_start=False, 
+                eps=0.05
+            )
+            
             for w in styles:
                 adv_w = adversary(
-                    w,
-                    noise,
+                    latent=w,
+                    noise=noise,
                     step=step,
                     alpha=1,
                     mean_style=mean_style,
                     style_weight=0.7,
+                    attack_w=True
                 )
                 styles_attacked.append(adv_w)
 
@@ -544,8 +542,8 @@ class StyledGenerator(nn.Module):
 
         if attack_w:
             visualize_data_distribution(
-                styles, 
-                styles_attacked
+                styles[0].detach().cpu().numpy(), 
+                styles_attacked[0].detach().cpu().numpy()
             )
             generated_attacked_images = self.generator(styles_attacked, noise, step, alpha, mixing_range=mixing_range)
             return generated_images, generated_attacked_images

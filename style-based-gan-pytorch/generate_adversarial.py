@@ -160,23 +160,22 @@ def attack_w_space(
             noise.append(torch.randn(z.shape[0], 1, size, size, device=z.device))
 
         z_list.extend(z)
+        
+        image, attacked_image = generator(
+            z,
+            noise=noise,
+            step=step,
+            alpha=1,
+            mean_style=mean_style,
+            style_weight=0.7,
+            discriminator=discriminator, 
+            attack_w=True
+        )
+        images.extend(image)
+        attacked_images.extend(attacked_image)
 
-        with torch.no_grad():
-            image, attacked_image = generator(
-                z,
-                noise=noise,
-                step=step,
-                alpha=1,
-                mean_style=mean_style,
-                style_weight=0.7,
-                discriminator=discriminator, 
-                attack_w=True
-            )
-            images.extend(image)
-            attacked_images.append(attacked_image)
-    
     images_tensor = torch.stack(images, dim=0)
-    attacked_images_tensor = torch.stack(attacked_image, dim=0)
+    attacked_images_tensor = torch.stack(attacked_images, dim=0)
     return images_tensor, attacked_images_tensor
     
 
@@ -253,11 +252,11 @@ if __name__ == '__main__':
     
     attack_w = True
     if attack_w:
-        img, adv_img = attack(generator, discriminator, step, mean_style, args.n_row * args.n_col, device)
-    else:
         img, adv_img = attack_w_space(generator, discriminator, step, mean_style, args.n_row * args.n_col, device)
-    utils.save_image(img, 'sample.png', nrow=args.n_col, normalize=True, range=(-1, 1))
-    utils.save_image(adv_img, 'sample_adv.png', nrow=args.n_col, normalize=True, range=(-1, 1))
+    else:
+        img, adv_img = attack(generator, discriminator, step, mean_style, args.n_row * args.n_col, device)
+    utils.save_image(img, 'ATTACK_Z_sample.png', nrow=args.n_col, normalize=True, range=(-1, 1))
+    utils.save_image(adv_img, 'ATTACK_Z_sample_adv.png', nrow=args.n_col, normalize=True, range=(-1, 1))
     
 #     for j in range(20):
 #         img = style_mixing(generator, step, mean_style, args.n_col, args.n_row, device)

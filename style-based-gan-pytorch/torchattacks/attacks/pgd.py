@@ -47,14 +47,12 @@ class PGD(Attack):
                 alpha=-1,
                 mean_style=None,
                 style_weight=0,
-                mixing_range=(-1, -1),):
+                mixing_range=(-1, -1),
+                attack_w=False):
         r"""
         Overridden.
         """
-        with torch.no_grad():
-            images = self.model(
-                latent, noise=noise, step=step, alpha=alpha, mean_style=mean_style, 
-                style_weight=style_weight, mixing_range=mixing_range)
+
         latent = latent.clone().detach().to(self.device)
         
         adv_latent = latent.clone().detach()
@@ -69,9 +67,19 @@ class PGD(Attack):
             self.model.zero_grad()
             self.discriminator.zero_grad()
             adv_latent.requires_grad = True
-            outputs = self.model(
-                adv_latent, noise=noise, step=step, alpha=alpha, mean_style=mean_style, 
-                style_weight=style_weight, mixing_range=mixing_range)
+            
+            if not attack_w:
+                outputs = self.model(
+                    adv_latent, noise=noise, step=step, alpha=alpha, mean_style=mean_style, 
+                    style_weight=style_weight, mixing_range=mixing_range)
+            else:
+                outputs = self.model(
+                    [adv_latent], 
+                    noise=noise, 
+                    step=step, 
+                    alpha=alpha, 
+                    mixing_range=mixing_range
+                )
 
             # Calculate discriminator loss
             disc_out = self.discriminator(outputs, step=step, alpha=alpha)
@@ -82,15 +90,16 @@ class PGD(Attack):
             # loss = -self.loss_fn(outputs, torch.zeros_like(outputs)) # .sum()
 
             # enforce KL divergence for adversarial latents
-            mu = torch.mean(adv_latent, dim=0)
-            sigma = torch.std(adv_latent, dim=0)
-            kl_loss = -0.5 * (1. + (sigma **2).log() - mu **2 - sigma **2).mean()
-            # print('KL:', kl_loss.item())
+            if not attack_w:
+                mu = torch.mean(adv_latent, dim=0)
+                sigma = torch.std(adv_latent, dim=0)
+                kl_loss = -0.5 * (1. + (sigma **2).log() - mu **2 - sigma **2).mean()
+                print('KL:', kl_loss.item())
 
-            # we perform gradient ascent but should still minimize KL div
-            loss = loss - 125. * kl_loss
-            # print('Wrong predictions: {} / {}'.format(
-            #     (disc_out.sigmoid() < 0.5).sum().item(), disc_out.shape[0]))
+                # we perform gradient ascent but should still minimize KL div
+                loss = loss - 100. * kl_loss
+#             print('Wrong predictions: {} / {}'.format(
+#                 (disc_out.sigmoid() < 0.5).sum().item(), disc_out.shape[0]))
 
             # Calculate loss
             # loss = self.loss_fn(outputs, images) # .sum()
