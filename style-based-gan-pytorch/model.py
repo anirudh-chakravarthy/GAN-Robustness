@@ -510,20 +510,6 @@ class StyledGenerator(nn.Module):
             w = self.style(i) 
             styles.append(w)
 
-        # If `attack_w` is set to True, compute attacked w. 
-        styles_attacked = []
-        if attack_w:
-            for w in styles:
-                adv_w = adversary(
-                    w,
-                    noise,
-                    step=step,
-                    alpha=1,
-                    mean_style=mean_style,
-                    style_weight=0.7,
-                )
-                styles_attacked.append(adv_w)
-
         batch = input[0].shape[0]
 
         if noise is None:
@@ -540,11 +526,19 @@ class StyledGenerator(nn.Module):
                 styles_norm.append(mean_style + style_weight * (style - mean_style))
             styles = styles_norm
 
-            if attack_w:
-                styles_norm_attacked = []
-                for style_attacked in styles_attacked:
-                    styles_norm_attacked.append(mean_style + style_weight * (style_attacked - mean_style))
-                styles_attacked = styles_norm_attacked
+        # If `attack_w` is set to True, compute attacked w. 
+        if attack_w:
+            styles_attacked = []
+            for w in styles:
+                adv_w = adversary(
+                    w,
+                    noise,
+                    step=step,
+                    alpha=1,
+                    mean_style=mean_style,
+                    style_weight=0.7,
+                )
+                styles_attacked.append(adv_w)
 
         generated_images = self.generator(styles, noise, step, alpha, mixing_range=mixing_range)
 
