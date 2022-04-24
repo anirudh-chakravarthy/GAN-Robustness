@@ -17,7 +17,7 @@ from torch.utils.data import DataLoader
 from torchvision import datasets, transforms, utils
 
 from dataset import MultiResolutionDataset
-from model import Discriminator
+from model import StyledGenerator, Discriminator
 
 
 def requires_grad(model, flag=True):
@@ -38,7 +38,7 @@ def adjust_lr(optimizer, lr):
         group['lr'] = lr * mult
 
 
-def train(args, dataset, discriminator):
+def train(args, dataset, generator, discriminator):
     step = int(math.log2(args.init_size)) - 2
     resolution = 4 * 2 ** step
     loader = sample_data(
@@ -49,7 +49,7 @@ def train(args, dataset, discriminator):
     adjust_lr(d_optimizer, args.lr.get(resolution, 0.001))
 
     # pbar = tqdm(range(3_000_000))
-    pbar = tqdm(range(6_000))
+    pbar = tqdm(range(12_000))
 
     requires_grad(discriminator, True)
     disc_loss_val = 0
@@ -110,11 +110,32 @@ def train(args, dataset, discriminator):
 
         b_size = real_image.size(0)
         real_image = real_image.cuda()
+        
+        if args.mixing and random.random() < 0.9:
+            gen_in11, gen_in12, gen_in21, gen_in22 = torch.randn(
+                4, b_size, code_size, device='cuda'
+            ).chunk(4, 0)
+            gen_in1 = [gen_in11.squeeze(0), gen_in12.squeeze(0)]
+            gen_in2 = [gen_in21.squeeze(0), gen_in22.squeeze(0)]
+
+        else:
+            gen_in1, gen_in2 = torch.randn(2, b_size, code_size, device='cuda').chunk(
+                2, 0
+            )
+            gen_in1 = gen_in1.squeeze(0)
+            gen_in2 = gen_in2.squeeze(0)
+
+        gen_image = generator(gen_in1, step=step, alpha=alpha)
 
         if args.loss == 'wgan-gp':
             real_predict = discriminator(real_image, step=step, alpha=alpha)
             real_predict = real_predict.mean() - 0.001 * (real_predict ** 2).mean()
             (-real_predict).backward()
+
+            # generator outputs as real
+            gen_predict = discriminator(gen_image, step=step, alpha=alpha)
+            gen_predict = gen_predict.mean() - 0.001 * (gen_predict ** 2).mean()
+            (-gen_predict).backward()
 
         elif args.loss == 'r1':
             real_image.requires_grad = True
@@ -132,23 +153,25 @@ def train(args, dataset, discriminator):
             grad_penalty.backward()
             if i%10 == 0:
                 grad_loss_val = grad_penalty.item()
+            
+            # generator outputs as real
+            gen_scores = discriminator(gen_image, step=step, alpha=alpha)
+            gen_predict = F.softplus(-gen_scores).mean()
+            gen_predict.backward(retain_graph=True)
 
-        if args.mixing and random.random() < 0.9:
-            gen_in11, gen_in12, gen_in21, gen_in22 = torch.randn(
-                4, b_size, code_size, device='cuda'
-            ).chunk(4, 0)
-            gen_in1 = [gen_in11.squeeze(0), gen_in12.squeeze(0)]
-            gen_in2 = [gen_in21.squeeze(0), gen_in22.squeeze(0)]
+            grad_real = grad(
+                outputs=gen_scores.sum(), inputs=gen_image, create_graph=True
+            )[0]
+            grad_penalty = (
+                grad_real.view(grad_real.size(0), -1).norm(2, dim=1) ** 2
+            ).mean()
+            grad_penalty = 10 / 2 * grad_penalty
+            grad_penalty.backward()
+            if i%10 == 0:
+                grad_loss_val += grad_penalty.item()
 
-        else:
-            gen_in1, gen_in2 = torch.randn(2, b_size, code_size, device='cuda').chunk(
-                2, 0
-            )
-            gen_in1 = gen_in1.squeeze(0)
-            gen_in2 = gen_in2.squeeze(0)
-
-        # TODO: normalize b/w [-1, 1]
         fake_image = torch.rand(real_image.shape, device=real_image.device)
+        fake_image = (fake_image - 0.5) / 0.5
         fake_predict = discriminator(fake_image, step=step, alpha=alpha)
 
         if args.loss == 'wgan-gp':
@@ -156,7 +179,7 @@ def train(args, dataset, discriminator):
             fake_predict.backward()
 
             eps = torch.rand(b_size, 1, 1, 1).cuda()
-            x_hat = eps * real_image.data + (1 - eps) * fake_image.data
+            x_hat = eps * gen_image.data + (1 - eps) * fake_image.data
             x_hat.requires_grad = True
             hat_predict = discriminator(x_hat, step=step, alpha=alpha)
             grad_x_hat = grad(
@@ -169,13 +192,13 @@ def train(args, dataset, discriminator):
             grad_penalty.backward()
             if i%10 == 0:
                 grad_loss_val = grad_penalty.item()
-                disc_loss_val = (-real_predict + fake_predict).item()
+                disc_loss_val = (-gen_predict + fake_predict).item()
 
         elif args.loss == 'r1':
             fake_predict = F.softplus(fake_predict).mean()
             fake_predict.backward()
             if i%10 == 0:
-                disc_loss_val = (real_predict + fake_predict).item()
+                disc_loss_val = (gen_predict + fake_predict).item()
 
         d_optimizer.step()
 
@@ -225,16 +248,21 @@ if __name__ == '__main__':
     )
 
     args = parser.parse_args()
-
+    generator = nn.DataParallel(StyledGenerator(code_size)).cuda()
     discriminator = nn.DataParallel(
         Discriminator(from_rgb_activate=not args.no_from_rgb_activate)
     ).cuda()
+    g_running = StyledGenerator(code_size).cuda()
+    g_running.train(False)
 
     d_optimizer = optim.Adam(discriminator.parameters(), lr=args.lr, betas=(0.0, 0.99))
 
     if args.ckpt is not None:
         ckpt = torch.load(args.ckpt)
+
+        generator.module.load_state_dict(ckpt['generator'])
         discriminator.module.load_state_dict(ckpt['discriminator'])
+        g_running.load_state_dict(ckpt['g_running'])
         d_optimizer.load_state_dict(ckpt['d_optimizer'])
 
     transform = transforms.Compose(
@@ -250,7 +278,9 @@ if __name__ == '__main__':
     if args.sched:
         args.lr = {128: 0.0015, 256: 0.002, 512: 0.003, 1024: 0.003}
         # args.batch = {4: 512, 8: 256, 16: 128, 32: 64, 64: 32, 128: 32, 256: 32}
-        args.batch = {4: 4, 8: 4, 16: 4, 32: 4, 64: 4, 128: 4, 256: 4}
+        args.batch = {
+            4: 256, 8: 128, 16: 64, 32: 32, 64: 16, 128: 16, 256: 8, 512: 2, 1024: 2
+        }
 
     else:
         args.lr = {}
@@ -260,4 +290,4 @@ if __name__ == '__main__':
 
     args.batch_default = 32
 
-    train(args, dataset, discriminator)
+    train(args, dataset, generator, discriminator)

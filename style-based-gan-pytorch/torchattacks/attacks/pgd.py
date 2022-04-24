@@ -73,7 +73,7 @@ class PGD(Attack):
             # Calculate discriminator loss
             disc_out = self.discriminator(outputs, step=step, alpha=alpha)
             loss = F.softplus(disc_out).mean()
-            print('Disc:', loss.item())
+            # print('Disc:', loss.item())
 
             # drive outputs to zeros, adv attack needs to actually minimize this loss
             # loss = -self.loss_fn(outputs, torch.zeros_like(outputs)) # .sum()
@@ -82,10 +82,10 @@ class PGD(Attack):
             mu = torch.mean(adv_latent, dim=0)
             sigma = torch.std(adv_latent, dim=0)
             kl_loss = -0.5 * (1. + (sigma **2).log() - mu **2 - sigma **2).mean()
-            print('KL:', kl_loss.item())
+            # print('KL:', kl_loss.item())
 
             # we perform gradient ascent but should still minimize KL div
-            loss = loss - 100. * kl_loss
+            loss = loss - 125. * kl_loss
 #             print('Wrong predictions: {} / {}'.format(
 #                 (disc_out.sigmoid() < 0.5).sum().item(), disc_out.shape[0]))
 
@@ -93,7 +93,7 @@ class PGD(Attack):
             # loss = self.loss_fn(outputs, images) # .sum()
 
             loss.backward()
-            print('Loss:', loss.item())
+            # print('Loss:', loss.item())
 
             # Update adversarial images
             # grad = torch.autograd.grad(loss, adv_latent, create_graph=False)[0]

@@ -74,7 +74,7 @@ def attack(generator, discriminator, step, mean_style, n_sample, device):
     
     z_list, adv_z_list = [], []
     images, adv_images = [], []
-    for i in range(1):
+    for i in range(100):
         z = torch.randn(n_sample, 512).to(device)
         noise = []
         for i in range(step + 1):
@@ -125,7 +125,7 @@ def attack(generator, discriminator, step, mean_style, n_sample, device):
             )
             images.extend(image)
             adv_images.extend(adv_image)
-    
+
     z = torch.stack(z_list, dim=0)
     adv_z = torch.stack(adv_z_list, dim=0)
     visualize_data_distribution(
@@ -191,7 +191,7 @@ if __name__ == '__main__':
         help='use activate in from_rgb (original implementation)',
     )
     parser.add_argument('path', type=str, help='path to checkpoint file')
-#     parser.add_argument('disc_path', type=str, help='path to discriminator checkpoint file')
+    parser.add_argument('disc_path', type=str, help='path to discriminator checkpoint file')
 
     args = parser.parse_args()
     
@@ -203,7 +203,7 @@ if __name__ == '__main__':
     generator.load_state_dict(ckpt['g_running'])
     generator.eval()
 
-    disc_ckpt = ckpt # torch.load(args.path)
+    disc_ckpt = torch.load(args.disc_path) # ckpt
     discriminator = Discriminator(from_rgb_activate=not args.no_from_rgb_activate).to(device)
     discriminator.load_state_dict(disc_ckpt['discriminator'])
     discriminator.eval()
