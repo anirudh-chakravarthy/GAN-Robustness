@@ -4,10 +4,25 @@ from torch import nn
 from torch.nn import init
 from torch.nn import functional as F
 from torch.autograd import Function
+from torchattacks import PGD
 
 from math import sqrt
 
+import matplotlib.pyplot as plt
+from sklearn.decomposition import PCA
+
 import random
+
+def visualize_data_distribution(z, adv_z):
+    pca = PCA(2)
+
+    z_proj = pca.fit_transform(z)
+    adv_z_proj = pca.fit_transform(adv_z)
+
+    plt.scatter(z_proj[:, 0], z_proj[:, 1], label='Orig', c='#6A10F1', alpha=0.80)
+    plt.scatter(adv_z_proj[:, 0], adv_z_proj[:, 1], label='Adv', c='#14F110', alpha=0.80)
+    plt.legend()
+    plt.savefig(f'latent_space_vis.png')
 
 
 def init_linear(linear):
@@ -470,13 +485,44 @@ class StyledGenerator(nn.Module):
         mean_style=None,
         style_weight=0,
         mixing_range=(-1, -1),
-    ):
+        discriminator=None,
+        attack_w=False
+    ):  
+
+        # Decide whether to attack w_space.
+        adversary = None
+        if attack_w:
+            adversary = PGD(
+                self, 
+                discriminator, 
+                alpha=1,
+                steps=100, 
+                random_start=False, 
+                eps=0.05
+            )
+
         styles = []
         if type(input) not in (list, tuple):
             input = [input]
-
+  
+        # Compute W-Space for all inputs.
         for i in input:
-            styles.append(self.style(i))
+            w = self.style(i) 
+            styles.append(w)
+
+        # If `attack_w` is set to True, compute attacked w. 
+        styles_attacked = []
+        if attack_w:
+            for w in styles:
+                adv_w = adversary(
+                    w,
+                    noise,
+                    step=step,
+                    alpha=1,
+                    mean_style=mean_style,
+                    style_weight=0.7,
+                )
+                styles_attacked.append(adv_w)
 
         batch = input[0].shape[0]
 
@@ -492,10 +538,26 @@ class StyledGenerator(nn.Module):
 
             for style in styles:
                 styles_norm.append(mean_style + style_weight * (style - mean_style))
-
             styles = styles_norm
 
-        return self.generator(styles, noise, step, alpha, mixing_range=mixing_range)
+            if attack_w:
+                styles_norm_attacked = []
+                for style_attacked in styles_attacked:
+                    styles_norm_attacked.append(mean_style + style_weight * (style_attacked - mean_style))
+                styles_attacked = styles_norm_attacked
+
+        generated_images = self.generator(styles, noise, step, alpha, mixing_range=mixing_range)
+
+        if attack_w:
+            visualize_data_distribution(
+                styles, 
+                styles_attacked
+            )
+            generated_attacked_images = self.generator(styles_attacked, noise, step, alpha, mixing_range=mixing_range)
+            return generated_images, generated_attacked_images
+        else:
+            return generated_images
+
 
     def mean_style(self, input):
         style = self.style(input).mean(0, keepdim=True)
