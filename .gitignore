@@ -5,6 +5,15 @@ data/thumbnails128x128
 **.ipynb_checkpoints
 **.DS_Store
 
+# Remove Pycache.
+**__pycache__
+
+# Ignore VSCode.
+**.vscode
+
+# Ignore TensorBoard.
+runs_adv/
+
 # checkpoints
 **.pkl
 **.pt
