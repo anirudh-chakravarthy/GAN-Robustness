@@ -18,9 +18,9 @@ class ResBlock(nn.Module):
         return out
 
 
-class Generator(nn.Module):
+class AdversarialMapper(nn.Module):
     def __init__(self, in_features=512, out_feature=512, num_res_blocks=3):
-        super(Generator, self).__init__()
+        super(AdversarialMapper, self).__init__()
 
         self.dense = nn.Linear(in_features=in_features, out_features=out_feature, bias=True)
         self.layers = [ResBlock(in_features=in_features) for _ in range(num_res_blocks)]
@@ -49,7 +49,7 @@ def test_resblock():
 
 def test_generator():
     x = torch.randn(size=(10, 512))
-    gen = Generator()
+    gen = AdversarialMapper()
     print(gen)
     print(gen(x).shape)
 

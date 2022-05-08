@@ -110,7 +110,7 @@ def train(args, dataset, generator, discriminator):
 
         b_size = real_image.size(0)
         real_image = real_image.cuda()
-        
+
         if args.mixing and random.random() < 0.9:
             gen_in11, gen_in12, gen_in21, gen_in22 = torch.randn(
                 4, b_size, code_size, device='cuda'

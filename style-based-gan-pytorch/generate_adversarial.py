@@ -3,32 +3,35 @@
 '''
 import argparse
 import math
+import matplotlib.pyplot as plt
 import numpy as np
 import random
-
 import torch
 from torchvision import utils
+from sklearn.decomposition import PCA
 
 from model import StyledGenerator, Discriminator
 import lpips
-
+from utils.plot_utils import plot_trajectory
 from torchattacks import PGD
+
 import pdb
 
-import matplotlib.pyplot as plt
-from sklearn.decomposition import PCA
 
-
-def visualize_data_distribution(z, adv_z):
-    pca = PCA(2)
-
-    z_proj = pca.fit_transform(z)
-    adv_z_proj = pca.fit_transform(adv_z)
-
-    plt.scatter(z_proj[:, 0], z_proj[:, 1], label='Orig', c='#6A10F1', alpha=0.80)
-    plt.scatter(adv_z_proj[:, 0], adv_z_proj[:, 1], label='Adv', c='#14F110', alpha=0.80)
+def visualize_data_distribution(z, adv_z, fileName='vis/latent_space_vis.png'):
+    z = project_distribution(z)
+    adv_z = project_distribution(adv_z)
+    plt.scatter(z[:, 0], z[:, 1], label='Orig', c='#6A10F1', alpha=0.80)
+    plt.scatter(adv_z[:, 0], adv_z[:, 1], label='Adv', c='#14F110', alpha=0.80)
     plt.legend()
-    plt.savefig(f'latent_space_vis.png')
+    plt.savefig(fileName)
+    plt.close()
+
+
+def project_distribution(z, dim=2):
+    pca = PCA(dim)
+    z_proj = pca.fit_transform(z)
+    return z_proj
 
 
 def seed_everything(seed):
@@ -68,13 +71,9 @@ def sample(generator, step, mean_style, n_sample, device):
 
 
 def attack(generator, discriminator, step, mean_style, n_sample, device):
-#     loss_fn = lpips.PerceptualLoss(
-#         model="net-lin", net="vgg", use_gpu=device.startswith("cuda")
-#     )
-    
     z_list, adv_z_list = [], []
     images, adv_images = [], []
-    for i in range(100):
+    for i in range(1):
         z = torch.randn(n_sample, 512).to(device)
         noise = []
         for i in range(step + 1):
@@ -82,7 +81,7 @@ def attack(generator, discriminator, step, mean_style, n_sample, device):
             noise.append(torch.randn(z.shape[0], 1, size, size, device=z.device))
 
         adversary = PGD(generator, discriminator, alpha=1,
-                        steps=100, random_start=False, eps=0.05)
+                        steps=100, random_start=True, eps=0.05)
         adv_z = adversary(
             z,
             noise,
@@ -93,18 +92,7 @@ def attack(generator, discriminator, step, mean_style, n_sample, device):
         )
 
         z_list.extend(z)
-        adv_z_list.extend(adv_z)
-
-#         visualize_data_distribution(
-#             z.detach().cpu().numpy(), adv_z.detach().cpu().numpy())
-
-#         mu = torch.mean(z, dim=0)
-#         sigma = torch.std(z, dim=0)
-#         adv_mu = torch.mean(adv_z, dim=0)
-#         adv_sigma = torch.std(adv_z, dim=0)
-#         print(-0.5 * (1. + (sigma **2).log() - mu **2 - sigma **2).mean())
-#         print(-0.5 * (1. + (adv_sigma **2).log() - adv_mu **2 - adv_sigma **2).mean())
-#         print(torch.mean((z-adv_z) **2).item())
+        adv_z_list.extend(adv_z[-1])
 
         with torch.no_grad():
             image = generator(
@@ -116,7 +104,7 @@ def attack(generator, discriminator, step, mean_style, n_sample, device):
                 style_weight=0.7,
             )
             adv_image = generator(
-                adv_z,
+                adv_z[-1],
                 noise=noise,
                 step=step,
                 alpha=1,
@@ -125,9 +113,19 @@ def attack(generator, discriminator, step, mean_style, n_sample, device):
             )
             images.extend(image)
             adv_images.extend(adv_image)
+    
+    # plot trajectory of attacked latent vector
+    proj_x, proj_y = [], []
+    for code in adv_z:
+        projected_code = project_distribution(code.detach().cpu().numpy())
+        proj_x.append(projected_code[1, 0])
+        proj_y.append(projected_code[1, 1])
+    plot_trajectory(proj_x, proj_y, 'vis/latent_code_vis.mp4')
 
     z = torch.stack(z_list, dim=0)
     adv_z = torch.stack(adv_z_list, dim=0)
+
+    # plot PCA
     visualize_data_distribution(
         z.detach().cpu().numpy(), adv_z.detach().cpu().numpy())
 
@@ -214,8 +212,8 @@ if __name__ == '__main__':
 
     # img = sample(generator, step, mean_style, args.n_row * args.n_col, device)
     img, adv_img = attack(generator, discriminator, step, mean_style, args.n_row * args.n_col, device)
-    utils.save_image(img, 'sample.png', nrow=args.n_col, normalize=True, range=(-1, 1))
-    utils.save_image(adv_img, 'sample_adv.png', nrow=args.n_col, normalize=True, range=(-1, 1))
+    utils.save_image(img, 'vis/sample.png', nrow=args.n_col, normalize=True, range=(-1, 1))
+    utils.save_image(adv_img, 'vis/sample_adv.png', nrow=args.n_col, normalize=True, range=(-1, 1))
     
 #     for j in range(20):
 #         img = style_mixing(generator, step, mean_style, args.n_col, args.n_row, device)

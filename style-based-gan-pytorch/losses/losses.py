@@ -6,7 +6,7 @@ sys.path.append("..")
 from utils.utils import get_device
 
 def mse_loss(pred, target, *args, **kwargs):
-    """ 
+    r""" 
     MSE loss between pred and target tensors
 
     Args:
@@ -21,7 +21,7 @@ def mse_loss(pred, target, *args, **kwargs):
     return loss
 
 def gradient_penalty(real, fake, disc, epsilon, device='cuda'):
-    """
+    r"""
     Computes gradient penalty term for WGAN-GP
     
     Args:
@@ -34,7 +34,6 @@ def gradient_penalty(real, fake, disc, epsilon, device='cuda'):
     """
 
     interp = real * epsilon + fake * (1 - epsilon)
-    interp.requires_grad = True
     disc_interp = disc(interp)
     gradient = torch.autograd.grad(
         inputs=interp,
@@ -48,8 +47,8 @@ def gradient_penalty(real, fake, disc, epsilon, device='cuda'):
     gp = torch.mean((gradient_norm - 1) ** 2)
     return gp
 
-def discriminator_loss(real, fake, disc, discrim_real, discrim_fake, lamb, device='cuda'):
-    """
+def discriminator_loss(real, fake, disc, lamb, device='cuda'):
+    r"""
     WGAN-GP loss for discriminator.
     loss = max_D E[D(real_data)] - E[D(fake_data)] + lambda * E[(|| grad wrt interpolated_data (D(interpolated_data))|| - 1)^2]
     
@@ -72,12 +71,15 @@ def discriminator_loss(real, fake, disc, discrim_real, discrim_fake, lamb, devic
     B, C = real.shape
     epsilon = torch.rand(size=(B, 1)).repeat(1, C).to(device)
     gp = gradient_penalty(real, fake, disc, epsilon)
-    loss_discrim = -1 * (torch.mean(discrim_real) - torch.mean(discrim_fake)) + lamb * gp
+    discrim_real = disc(real)
+    discrim_fake = disc(fake)
+    loss_discrim = -1 * (torch.mean(discrim_real) - 
+                         torch.mean(discrim_fake)) + lamb * gp
     return loss_discrim
 
 
 def generator_loss(real, fake, discrim_fake, device='cuda'):
-    """
+    r"""
     loss = - E[D(fake_data)]
     output = disc(discrim_fake)
     """
@@ -86,7 +88,7 @@ def generator_loss(real, fake, discrim_fake, device='cuda'):
 
 
 class Losses(nn.Module):
-    """ 
+    r""" 
     Class to create a loss object
     """
     def __init__(self, fn='adv_disc_loss', device=None):

@@ -19,6 +19,7 @@ from torchvision import datasets, transforms, utils
 from dataset import MultiResolutionDataset
 from model import StyledGenerator, Discriminator
 
+
 class ResBlockDown(nn.Module):
     def __init__(self, in_features, out_features):
         super(ResBlockDown, self).__init__()

@@ -1,233 +1,109 @@
 '''
-    Usage: python train_latent_disc.py --mixing --loss r1 --sched ../data/
+    Usage: python train_latent_disc.py --ckpt stylegan-256px-new.model
 '''
 import argparse
-import random
-import math
-
-from tqdm import tqdm
-import numpy as np
-from PIL import Image
+from copy import deepcopy
 
 import torch
 from torch import nn, optim
+from torch.autograd import grad
 from torch.nn import functional as F
-from torch.autograd import Variable, grad
-from torch.utils.data import DataLoader
-from torchvision import datasets, transforms, utils
+from tqdm import tqdm
 
-from dataset import MultiResolutionDataset
+from losses.losses import Losses
 from model import StyledGenerator, Discriminator
-from models.latent_discriminator import LatentDiscriminator
+from models import LatentDiscriminator, AdversarialMapper
+
+import pdb
+
 
 def requires_grad(model, flag=True):
     for p in model.parameters():
         p.requires_grad = flag
 
 
-def sample_data(dataset, batch_size, image_size=4):
-    dataset.resolution = image_size
-    loader = DataLoader(dataset, shuffle=True, batch_size=batch_size, num_workers=1, drop_last=True)
+def train(
+    args, 
+    generator,
+    adv_generator,
+    noise_discriminator,
+    latent_discriminator,
+):
+    requires_grad(noise_discriminator, True)
+    requires_grad(latent_discriminator, True)
+    requires_grad(generator, True)
+    requires_grad(adv_generator, True)
 
-    return loader
+    latent_disc_loss_fn = Losses(fn=args.loss)
+    latent_disc_loss_val = 0.
 
+    step = 6
+    alpha = 1
 
-def adjust_lr(optimizer, lr):
-    for group in optimizer.param_groups:
-        mult = group.get('mult', 1)
-        group['lr'] = lr * mult
-
-
-def train(args, dataset, generator, discriminator):
-    step = int(math.log2(args.init_size)) - 2
-    resolution = 4 * 2 ** step
-    loader = sample_data(
-        dataset, args.batch.get(resolution, args.batch_default), resolution
-    )
-    data_loader = iter(loader)
-    
-    adjust_lr(d_optimizer, args.lr.get(resolution, 0.001))
-
-    # pbar = tqdm(range(3_000_000))
     pbar = tqdm(range(12_000))
-
-    requires_grad(discriminator, True)
-    disc_loss_val = 0
-    grad_loss_val = 0
-
-    alpha = 0
-    used_sample = 0
-
-    max_step = int(math.log2(args.max_size)) - 2
-    final_progress = False
-
     for i in pbar:
-        discriminator.zero_grad()
+        generator.zero_grad()
+        adv_generator.zero_grad()
+        noise_discriminator.zero_grad()
+        latent_discriminator.zero_grad()
+
+        d_optimizer.zero_grad()
+        m_optimizer.zero_grad()
+
+        z = torch.rand(args.batch_size, 512).cuda()
+        real_w = generator.module.style(z)
+        fake_w = adv_generator.module.style(z) # real_w
         
-        alpha = min(1, 1 / args.phase * (used_sample + 1))
-
-        if (resolution == args.init_size and args.ckpt is None) or final_progress:
-            alpha = 1
-
-        if used_sample > args.phase * 2:
-            used_sample = 0
-            step += 1
-
-            if step > max_step:
-                step = max_step
-                final_progress = True
-                ckpt_step = step + 1
-
-            else:
-                alpha = 0
-                ckpt_step = step
-
-            resolution = 4 * 2 ** step
-
-            loader = sample_data(
-                dataset, args.batch.get(resolution, args.batch_default), resolution
-            )
-            data_loader = iter(loader)
-            
-            torch.save(
-                {
-                    'discriminator': discriminator.module.state_dict(),
-                    'd_optimizer': d_optimizer.state_dict(),
-                },
-                f'checkpoint/train_step-{ckpt_step}.model',
-            )
-
-            adjust_lr(d_optimizer, args.lr.get(resolution, 0.001))
-            
-        try:
-            real_image = next(data_loader)
-
-        except (OSError, StopIteration):
-            data_loader = iter(loader)
-            real_image = next(data_loader)
-
-        used_sample += real_image.shape[0]
-
-        b_size = real_image.size(0)
-        real_image = real_image.cuda()
+        # TODO: call generator on real and fake W
+        # gen_real = generator(z) # update args
+        gen_fake = adv_generator(z, step=step, alpha=alpha) # update args
         
-        if args.mixing and random.random() < 0.9:
-            gen_in11, gen_in12, gen_in21, gen_in22 = torch.randn(
-                4, b_size, code_size, device='cuda'
-            ).chunk(4, 0)
-            gen_in1 = [gen_in11.squeeze(0), gen_in12.squeeze(0)]
-            gen_in2 = [gen_in21.squeeze(0), gen_in22.squeeze(0)]
+        # compute noise discriminator loss on real image
+        # gen_scores = noise_discriminator(gen_real)
+        # gen_predict = F.softplus(-gen_scores).mean()
+        # gen_predict.backward(retain_graph=True)
 
-        else:
-            gen_in1, gen_in2 = torch.randn(2, b_size, code_size, device='cuda').chunk(
-                2, 0
-            )
-            gen_in1 = gen_in1.squeeze(0)
-            gen_in2 = gen_in2.squeeze(0)
-
-        gen_image = generator(gen_in1, step=step, alpha=alpha)
-
-        if args.loss == 'wgan-gp':
-            real_predict = discriminator(real_image, step=step, alpha=alpha)
-            real_predict = real_predict.mean() - 0.001 * (real_predict ** 2).mean()
-            (-real_predict).backward()
-
-            # generator outputs as real
-            gen_predict = discriminator(gen_image, step=step, alpha=alpha)
-            gen_predict = gen_predict.mean() - 0.001 * (gen_predict ** 2).mean()
-            (-gen_predict).backward()
-
-        elif args.loss == 'r1':
-            real_image.requires_grad = True
-            real_scores = discriminator(real_image, step=step, alpha=alpha)
-            real_predict = F.softplus(-real_scores).mean()
-            real_predict.backward(retain_graph=True)
-
-            grad_real = grad(
-                outputs=real_scores.sum(), inputs=real_image, create_graph=True
-            )[0]
-            grad_penalty = (
-                grad_real.view(grad_real.size(0), -1).norm(2, dim=1) ** 2
-            ).mean()
-            grad_penalty = 10 / 2 * grad_penalty
-            grad_penalty.backward()
-            if i%10 == 0:
-                grad_loss_val = grad_penalty.item()
-            
-            # generator outputs as real
-            gen_scores = discriminator(gen_image, step=step, alpha=alpha)
-            gen_predict = F.softplus(-gen_scores).mean()
-            gen_predict.backward(retain_graph=True)
-
-            grad_real = grad(
-                outputs=gen_scores.sum(), inputs=gen_image, create_graph=True
-            )[0]
-            grad_penalty = (
-                grad_real.view(grad_real.size(0), -1).norm(2, dim=1) ** 2
-            ).mean()
-            grad_penalty = 10 / 2 * grad_penalty
-            grad_penalty.backward()
-            if i%10 == 0:
-                grad_loss_val += grad_penalty.item()
-
-        fake_image = torch.rand(real_image.shape, device=real_image.device)
-        fake_image = (fake_image - 0.5) / 0.5
-        fake_predict = discriminator(fake_image, step=step, alpha=alpha)
-
-        if args.loss == 'wgan-gp':
-            fake_predict = fake_predict.mean()
-            fake_predict.backward()
-
-            eps = torch.rand(b_size, 1, 1, 1).cuda()
-            x_hat = eps * gen_image.data + (1 - eps) * fake_image.data
-            x_hat.requires_grad = True
-            hat_predict = discriminator(x_hat, step=step, alpha=alpha)
-            grad_x_hat = grad(
-                outputs=hat_predict.sum(), inputs=x_hat, create_graph=True
-            )[0]
-            grad_penalty = (
-                (grad_x_hat.view(grad_x_hat.size(0), -1).norm(2, dim=1) - 1) ** 2
-            ).mean()
-            grad_penalty = 10 * grad_penalty
-            grad_penalty.backward()
-            if i%10 == 0:
-                grad_loss_val = grad_penalty.item()
-                disc_loss_val = (-gen_predict + fake_predict).item()
-
-        elif args.loss == 'r1':
-            fake_predict = F.softplus(fake_predict).mean()
-            fake_predict.backward()
-            if i%10 == 0:
-                disc_loss_val = (gen_predict + fake_predict).item()
+        # grad_real = grad(
+        #     outputs=gen_scores.sum(), inputs=gen_real, create_graph=True
+        # )[0]
+        # grad_penalty = (
+        #     grad_real.view(grad_real.size(0), -1).norm(2, dim=1) ** 2
+        # ).mean()
+        # grad_penalty = 10 / 2 * grad_penalty
+        # grad_penalty.backward()
+        # grad_loss_val = grad_penalty.item()
+        
+        # compute noise discriminator loss on fake image
+        fake_predict = noise_discriminator(gen_fake, step=step, alpha=alpha)
+        fake_predict = F.softplus(fake_predict).mean()
+        fake_predict.backward()
+        
+        latent_disc_loss = latent_disc_loss_fn(real_w, fake_w, latent_discriminator, 5.0)
+        latent_disc_loss_val = latent_disc_loss.item()
+        latent_disc_loss.backward()
 
         d_optimizer.step()
+        m_optimizer.step()
 
-        state_msg = (
-            f'Size: {4 * 2 ** step}; D: {disc_loss_val:.3f};'
-            f' Grad: {grad_loss_val:.3f}; Alpha: {alpha:.5f}'
-        )
+        if i % 500 == 0:
+            torch.save({
+                    'adv_mapper': adv_generator.module.style.state_dict(),
+                    'discriminator': latent_discriminator.state_dict(),
+                    'm_optimizer': m_optimizer.state_dict(),
+                    'd_optimizer': d_optimizer.state_dict(),
+                },
+                f'checkpoint_latent_discriminator/train_step-{i}.model',
+            )
 
+        state_msg = (f'D: {latent_disc_loss_val:.3f}')
         pbar.set_description(state_msg)
 
 
 if __name__ == '__main__':
     code_size = 512
-    batch_size = 16
-    n_critic = 1
+    parser = argparse.ArgumentParser(description='Training a latent discriminator')
 
-    parser = argparse.ArgumentParser(description='Progressive Growing of GANs')
-
-    parser.add_argument('path', type=str, help='path of specified dataset')
-    parser.add_argument(
-        '--phase',
-        type=int,
-        default=600, #600_000
-        help='number of samples used for each training phases',
-    )
     parser.add_argument('--lr', default=0.001, type=float, help='learning rate')
-    parser.add_argument('--sched', action='store_true', help='use lr scheduling')
-    parser.add_argument('--init_size', default=8, type=int, help='initial image size')
-    parser.add_argument('--max_size', default=1024, type=int, help='max image size')
     parser.add_argument(
         '--ckpt', default=None, type=str, help='load from previous checkpoints'
     )
@@ -237,59 +113,33 @@ if __name__ == '__main__':
         help='use activate in from_rgb (original implementation)',
     )
     parser.add_argument(
-        '--mixing', action='store_true', help='use mixing regularization'
-    )
-    parser.add_argument(
         '--loss',
         type=str,
-        default='wgan-gp',
-        choices=['wgan-gp', 'r1'],
+        default='adv_disc_loss',
+        choices=['adv_disc_loss', 'adv_gen_loss'],
         help='class of gan loss',
     )
 
     args = parser.parse_args()
     generator = nn.DataParallel(StyledGenerator(code_size)).cuda()
-    discriminator = nn.DataParallel(
-        Discriminator(from_rgb_activate=not args.no_from_rgb_activate)
-    ).cuda()
-    g_running = StyledGenerator(code_size).cuda()
-    g_running.train(False)
+    adv_generator = nn.DataParallel(StyledGenerator(code_size)).cuda()
+    noise_discriminator = nn.DataParallel(
+        Discriminator(from_rgb_activate=not args.no_from_rgb_activate)).cuda()
+    latent_discriminator = nn.DataParallel(LatentDiscriminator()).cuda()
 
-    d_optimizer = optim.Adam(discriminator.parameters(), lr=args.lr, betas=(0.0, 0.99))
+     # TODO: Change generator to ProGAN generator
+    # latent_mapper = nn.DataParallel(generator.module.style)
+    # adv_mapper = deepcopy(latent_mapper)
+
+    d_optimizer = optim.Adam(latent_discriminator.parameters(), lr=args.lr, betas=(0.0, 0.99))
+    m_optimizer = optim.Adam(
+        adv_generator.module.style.parameters(), lr=args.lr, betas=(0.0, 0.99))
 
     if args.ckpt is not None:
         ckpt = torch.load(args.ckpt)
-
         generator.module.load_state_dict(ckpt['generator'])
-        discriminator.module.load_state_dict(ckpt['discriminator'])
-        g_running.load_state_dict(ckpt['g_running'])
-        d_optimizer.load_state_dict(ckpt['d_optimizer'])
+        adv_generator.module.load_state_dict(ckpt['generator'])
 
-    transform = transforms.Compose(
-        [
-            transforms.RandomHorizontalFlip(),
-            transforms.ToTensor(),
-            transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5), inplace=True),
-        ]
-    )
+    args.batch_size = 16
 
-    dataset = MultiResolutionDataset(args.path, transform)
-
-    if args.sched:
-        args.lr = {128: 0.0015, 256: 0.002, 512: 0.003, 1024: 0.003}
-        # args.batch = {4: 512, 8: 256, 16: 128, 32: 64, 64: 32, 128: 32, 256: 32}
-        args.batch = {
-            4: 256, 8: 128, 16: 64, 32: 32, 64: 16, 128: 16, 256: 8, 512: 2, 1024: 2
-        }
-
-    else:
-        args.lr = {}
-        args.batch = {}
-
-    args.gen_sample = {512: (8, 4), 1024: (4, 2)}
-
-    args.batch_default = 32
-
-    import pdb; pdb.set_trace()
-    latent_mapper = generator.style
-    train(args, dataset, generator, discriminator)
+    train(args, generator, adv_generator, noise_discriminator, latent_discriminator)
