@@ -476,6 +476,18 @@ class StyledGenerator(nn.Module):
 
         self.style = nn.Sequential(*layers)
 
+        # adversary = PGD(generator, discriminator, alpha=1,
+        #                 steps=100, random_start=False, eps=0.05)
+        # adv_w = adversary(
+        #     self.style,
+        #     noise,
+        #     step=step,
+        #     alpha=1,
+        #     mean_style=mean_style,
+        #     style_weight=0.7,
+        # )
+
+
     def forward(
         self,
         input,

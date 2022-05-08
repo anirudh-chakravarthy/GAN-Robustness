@@ -8,7 +8,10 @@ import numpy as np
 import random
 import torch
 from torchvision import utils
+
 from sklearn.decomposition import PCA
+from utils import compute_fid
+from torch.utils.tensorboard import SummaryWriter
 
 from model import StyledGenerator, Discriminator
 import lpips
@@ -71,9 +74,31 @@ def sample(generator, step, mean_style, n_sample, device):
 
 
 def attack(generator, discriminator, step, mean_style, n_sample, device):
+#     loss_fn = lpips.PerceptualLoss(
+#         model="net-lin", net="vgg", use_gpu=device.startswith("cuda")
+#     )
+    
+    # Initialise Tensorboard.
+    writer = SummaryWriter('style-based-gan-pytorch/runs_adv')
+
     z_list, adv_z_list = [], []
     images, adv_images = [], []
-    for i in range(1):
+    
+    adversary = PGD(
+        generator, 
+        discriminator, 
+        alpha=1,
+        steps=100, 
+        random_start=False, 
+        eps=0.05
+    )
+
+    total_samples = 15000//n_sample # Total Samples should be 15000 in steps of n_samples.
+    
+    fid_scores_latent = []
+    fid_scores_adv_latent = []
+
+    for i in range(total_samples):
         z = torch.randn(n_sample, 512).to(device)
         noise = []
         for i in range(step + 1):
@@ -114,6 +139,25 @@ def attack(generator, discriminator, step, mean_style, n_sample, device):
             images.extend(image)
             adv_images.extend(adv_image)
     
+        print(f"i = {i}")
+        if i % 1 == 0:
+            # Compute FID between actual dataset and `latent`.
+            fid_score = compute_fid(
+                torch.stack(images, dim=0)
+            )
+            fid_scores_latent.append(fid_score)
+            writer.add_scalar('fid/latent', fid_score, i)
+
+            # Compute FID between actual dataset and `avd_latent`
+            fid_score_adv = compute_fid(
+                torch.stack(adv_images, dim=0)
+            )
+            fid_scores_adv_latent.append(fid_score_adv)
+            writer.add_scalar('fid/adv_latent', fid_score_adv, i)
+
+            print(f"\n STEP={i} -- FID score of Raw Latent Vector: {fid_score}")
+            print(f"\n STEP={i} -- FID score of Adversarial Latent Vector: {fid_score_adv}")
+
     # plot trajectory of attacked latent vector
     proj_x, proj_y = [], []
     for code in adv_z:
@@ -138,6 +182,20 @@ def attack(generator, discriminator, step, mean_style, n_sample, device):
 
     image = torch.stack(images, dim=0)
     adv_image = torch.stack(adv_images, dim=0)
+
+    # Compute FID between actual dataset and `latent`.
+    fid_score = compute_fid(
+        image
+    )
+
+    # Compute FID between actual dataset and `avd_latent`
+    fid_score_adv = compute_fid(
+        adv_image
+    )
+
+    print(f"\n FID score of Raw Latent Vector: {fid_score}")
+    print(f"\n FID score of Adversarial Latent Vector: {fid_score_adv}")
+
     return image, adv_image
     
 
@@ -236,6 +294,7 @@ if __name__ == '__main__':
 
     ckpt = torch.load(args.path)
     generator = StyledGenerator(512).to(device)
+    
     generator.load_state_dict(ckpt['g_running'])
     generator.eval()
 
@@ -247,6 +306,7 @@ if __name__ == '__main__':
     mean_style = get_mean_style(generator, device)
 
     step = int(math.log(args.size, 2)) - 2
+    print(f"Step = {step}")
 
     # img = sample(generator, step, mean_style, args.n_row * args.n_col, device)
     
