@@ -4,6 +4,7 @@ data/thumbnails128x128
 
 **.ipynb_checkpoints
 **.DS_Store
+vis/
 
 # Remove Pycache.
 **__pycache__

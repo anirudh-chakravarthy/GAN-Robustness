@@ -10,7 +10,7 @@ import torch
 from torchvision import utils
 
 from sklearn.decomposition import PCA
-from utils import compute_fid
+from utils.utils import compute_fid
 from torch.utils.tensorboard import SummaryWriter
 
 from model import StyledGenerator, Discriminator
@@ -93,12 +93,13 @@ def attack(generator, discriminator, step, mean_style, n_sample, device):
         eps=0.05
     )
 
-    total_samples = 15000//n_sample # Total Samples should be 15000 in steps of n_samples.
+    total_samples = 15 // n_sample # Total Samples should be 15000 in steps of n_samples.
     
     fid_scores_latent = []
     fid_scores_adv_latent = []
 
     for i in range(total_samples):
+        print("Iteration: ", i)
         z = torch.randn(n_sample, 512).to(device)
         noise = []
         for i in range(step + 1):
@@ -139,24 +140,24 @@ def attack(generator, discriminator, step, mean_style, n_sample, device):
             images.extend(image)
             adv_images.extend(adv_image)
     
-        print(f"i = {i}")
-        if i % 1 == 0:
-            # Compute FID between actual dataset and `latent`.
-            fid_score = compute_fid(
-                torch.stack(images, dim=0)
-            )
-            fid_scores_latent.append(fid_score)
-            writer.add_scalar('fid/latent', fid_score, i)
+        # print(f"i = {i}")
+        # if i % 1 == 0:
+        #     # Compute FID between actual dataset and `latent`.
+        #     fid_score = compute_fid(
+        #         torch.stack(images, dim=0)
+        #     )
+        #     fid_scores_latent.append(fid_score)
+        #     writer.add_scalar('fid/latent', fid_score, i)
 
-            # Compute FID between actual dataset and `avd_latent`
-            fid_score_adv = compute_fid(
-                torch.stack(adv_images, dim=0)
-            )
-            fid_scores_adv_latent.append(fid_score_adv)
-            writer.add_scalar('fid/adv_latent', fid_score_adv, i)
+        #     # Compute FID between actual dataset and `avd_latent`
+        #     fid_score_adv = compute_fid(
+        #         torch.stack(adv_images, dim=0)
+        #     )
+        #     fid_scores_adv_latent.append(fid_score_adv)
+        #     writer.add_scalar('fid/adv_latent', fid_score_adv, i)
 
-            print(f"\n STEP={i} -- FID score of Raw Latent Vector: {fid_score}")
-            print(f"\n STEP={i} -- FID score of Adversarial Latent Vector: {fid_score_adv}")
+        #     print(f"\n STEP={i} -- FID score of Raw Latent Vector: {fid_score}")
+        #     print(f"\n STEP={i} -- FID score of Adversarial Latent Vector: {fid_score_adv}")
 
     # plot trajectory of attacked latent vector
     proj_x, proj_y = [], []
@@ -210,7 +211,11 @@ def attack_w_space(
     
     z_list = []
     images, attacked_images = [], []
-    for i in range(1):
+
+    total_samples = 15 // n_sample # Total Samples should be 15000 in steps of n_samples.
+
+    for i in range(total_samples):
+        print("Iteration: ", i)
         z = torch.randn(n_sample, 512).to(device)
         noise = []
         for i in range(step + 1):
@@ -234,6 +239,20 @@ def attack_w_space(
 
     images_tensor = torch.stack(images, dim=0)
     attacked_images_tensor = torch.stack(attacked_images, dim=0)
+
+    # Compute FID between actual dataset and `latent`.
+    fid_score = compute_fid(
+        images_tensor
+    )
+
+    # Compute FID between actual dataset and `avd_latent`
+    fid_score_adv = compute_fid(
+        attacked_images_tensor
+    )
+
+    print(f"\n FID score of Raw Latent Vector: {fid_score}")
+    print(f"\n FID score of Adversarial Latent Vector: {fid_score_adv}")
+
     return images_tensor, attacked_images_tensor
     
 
@@ -284,6 +303,7 @@ if __name__ == '__main__':
         action='store_true',
         help='use activate in from_rgb (original implementation)',
     )
+    parser.add_argument('--attack_w', action='store_true', help='Attack W space or Z Space')
     parser.add_argument('path', type=str, help='path to checkpoint file')
     parser.add_argument('disc_path', type=str, help='path to discriminator checkpoint file')
 
@@ -310,16 +330,9 @@ if __name__ == '__main__':
 
     # img = sample(generator, step, mean_style, args.n_row * args.n_col, device)
     
-    attack_w = True
-    if attack_w:
+    if args.attack_w:
         img, adv_img = attack_w_space(generator, discriminator, step, mean_style, args.n_row * args.n_col, device)
     else:
         img, adv_img = attack(generator, discriminator, step, mean_style, args.n_row * args.n_col, device)
-    utils.save_image(img, 'ATTACK_Z_sample.png', nrow=args.n_col, normalize=True, range=(-1, 1))
-    utils.save_image(adv_img, 'ATTACK_Z_sample_adv.png', nrow=args.n_col, normalize=True, range=(-1, 1))
-    
-#     for j in range(20):
-#         img = style_mixing(generator, step, mean_style, args.n_col, args.n_row, device)
-#         utils.save_image(
-#             img, f'sample_mixing_{j}.png', nrow=args.n_col + 1, normalize=True, range=(-1, 1)
-#         )
+    utils.save_image(img, 'vis/sample.png', nrow=args.n_col, normalize=True, range=(-1, 1))
+    utils.save_image(adv_img, 'vis/sample_adv.png', nrow=args.n_col, normalize=True, range=(-1, 1))

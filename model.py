@@ -555,9 +555,9 @@ class StyledGenerator(nn.Module):
         if attack_w:
             visualize_data_distribution(
                 styles[0].detach().cpu().numpy(), 
-                styles_attacked[0].detach().cpu().numpy()
+                styles_attacked[0][-1].detach().cpu().numpy()
             )
-            generated_attacked_images = self.generator(styles_attacked, noise, step, alpha, mixing_range=mixing_range)
+            generated_attacked_images = self.generator([styles_attacked[0][-1]], noise, step, alpha, mixing_range=mixing_range)
             return generated_images, generated_attacked_images
         else:
             return generated_images
